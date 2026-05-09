@@ -54,7 +54,7 @@ function App() {
   useEffect(() => {
     const a = new Audio("shuffle.wav");
     a.preload = "auto";
-    a.volume = 0.85;
+    a.volume = 0.5;
     audioRef.current = a;
   }, []);
 
