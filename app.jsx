@@ -1,22 +1,13 @@
 const { useState, useEffect, useMemo, useRef } = React;
 
 // ---- Icons ----
-const IconShuffle = ({ size = 22 }) => (
+const IconUndo = ({ size = 22 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M16 3h5v5" />
-    <path d="M4 20l17-17" />
-    <path d="M21 16v5h-5" />
-    <path d="M15 15l6 6" />
-    <path d="M4 4l5 5" />
+    <path d="M3 7v6h6" />
+    <path d="M3 13C5 8.5 9.5 6 13.5 6a8.5 8.5 0 0 1 7.5 7.5" />
   </svg>
 );
-const IconList = ({ size = 22 }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M4 6h16" />
-    <path d="M4 12h16" />
-    <path d="M4 18h10" />
-  </svg>
-);
+
 const IconBack = ({ size = 22 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M19 12H5" />
@@ -53,14 +44,13 @@ function deriveName(file, i) {
 function App() {
   const cards = useMemo(getCards, []);
   const [currentIdx, setCurrentIdx] = useState(null);
-  const [history, setHistory] = useState([]); // recent draw indices
-  const [phase, setPhase] = useState("idle"); // idle | shuffling | revealing
-  const [previewIdx, setPreviewIdx] = useState(null); // card flashing during shuffle
-  const [pendingIdx, setPendingIdx] = useState(null); // card chosen, mounted hidden during shuffle so it's pre-decoded
+  const [prevIdx, setPrevIdx] = useState(null); // one-level undo
+  const [history, setHistory] = useState([]);
+  const [phase, setPhase] = useState("idle");
+  const [pendingIdx, setPendingIdx] = useState(null);
   const shuffleTimers = useRef([]);
   const audioRef = useRef(null);
 
-  // Preload the shuffle sound
   useEffect(() => {
     const a = new Audio("shuffle.wav");
     a.preload = "auto";
@@ -68,7 +58,6 @@ function App() {
     audioRef.current = a;
   }, []);
 
-  // Preload PNGs before allowing draws
   const [loaded, setLoaded] = useState(0);
   const [totalToLoad, setTotalToLoad] = useState(0);
   useEffect(() => {
@@ -94,13 +83,9 @@ function App() {
   useEffect(() => clearTimers, []);
 
   function pickRandom() {
-    if (cards.length === 0 || phase !== "idle") return;
+    if (cards.length === 0 || phase !== "idle" || !ready) return;
     clearTimers();
 
-    // ---- "Feels random" logic ----
-    // Avoid the most-recently-drawn cards. With N cards, hold back roughly
-    // the last N/3 draws (min 2, max 8) so a card needs some breathing room
-    // before it can come back. With 1 card we have to allow it.
     const N = cards.length;
     const holdBack = Math.min(8, Math.max(2, Math.floor(N / 3)));
     const recent = history.slice(-Math.min(holdBack, N - 1));
@@ -108,22 +93,19 @@ function App() {
     if (pool.length === 0) pool = cards.map((_, i) => i);
     const next = pool[Math.floor(Math.random() * pool.length)];
 
-    // ---- Shuffle: show card backs while the deck riffles ----
     setPhase("shuffling");
-    setPendingIdx(next); // mounts the chosen image hidden so it decodes during the shuffle
+    setPendingIdx(next);
     const SHUFFLE_MS = 1150;
 
-    // Play the shuffle sound
     const a = audioRef.current;
     if (a) {
       try {
         a.currentTime = 0;
         const p = a.play();
         if (p && p.catch) p.catch(() => {});
-      } catch (e) { /* ignore */ }
+      } catch (e) {}
     }
 
-    // Force a fresh decode of the chosen image so it's pixel-ready before reveal
     const decodePromise = (() => {
       const img = new Image();
       img.src = cards[next].file;
@@ -134,6 +116,7 @@ function App() {
     });
 
     Promise.all([decodePromise, delayPromise]).then(() => {
+      setPrevIdx(currentIdx); // save for undo
       setCurrentIdx(next);
       setHistory((prev) => [...prev, next].slice(-12));
       setPhase("revealing");
@@ -144,7 +127,15 @@ function App() {
     });
   }
 
+  function undoDraw() {
+    if (prevIdx === null || phase !== "idle") return;
+    setCurrentIdx(prevIdx);
+    setPrevIdx(null);
+    setHistory((prev) => prev.slice(0, -1));
+  }
+
   const currentCard = currentIdx != null ? cards[currentIdx] : null;
+  const canUndo = prevIdx !== null && phase === "idle";
 
   return (
     <div className="app">
@@ -154,33 +145,52 @@ function App() {
         currentCard={currentCard}
         pendingIdx={pendingIdx}
         phase={phase}
-        hasDrawn={currentIdx != null}
         ready={ready}
         loadedPct={totalToLoad ? Math.round((loaded / totalToLoad) * 100) : 0}
+        canUndo={canUndo}
         onDraw={pickRandom}
+        onUndo={undoDraw}
       />
     </div>
   );
 }
 
-function DrawView({ cards, currentCard, pendingIdx, phase, hasDrawn, ready, loadedPct, onDraw }) {
+function DrawView({ cards, currentCard, pendingIdx, phase, ready, loadedPct, canUndo, onDraw, onUndo }) {
   const empty = cards.length === 0;
   const shuffling = phase === "shuffling";
+  const tappable = !empty && !shuffling && ready;
+
   return (
     <div className="screen">
       <header className="topbar">
         <div className="brand">
           <Compass size={34} />
           <div className="brand-text">
-            <div className="kicker">Map randomizer</div>
+            <div className="kicker">
+              {!ready && !empty ? `Laster… ${loadedPct}%` : "Map randomizer"}
+            </div>
             <h1>Den Forbudte Øya</h1>
           </div>
         </div>
+        <button
+          className={`icon-btn undo-btn ${canUndo ? "undo-visible" : ""}`}
+          onClick={onUndo}
+          disabled={!canUndo}
+          aria-label="Angre"
+        >
+          <IconUndo />
+        </button>
       </header>
 
       <main className="stage">
-        <div className="card-stack">
-          {/* decorative back layers — only visible during shuffle */}
+        <div
+          className={`card-stack ${tappable ? "card-stack-tap" : ""}`}
+          onClick={tappable ? onDraw : undefined}
+          role={tappable ? "button" : undefined}
+          tabIndex={tappable ? 0 : undefined}
+          onKeyDown={tappable ? (e) => e.key === "Enter" || e.key === " " ? onDraw() : null : undefined}
+          aria-label="Trekk tilfeldig kart"
+        >
           <div className={`stack-layer layer-3 ${shuffling ? "show shake-3" : ""}`} style={shuffling ? null : { transform: "translate(7px, 9px) rotate(2.6deg)" }} />
           <div className={`stack-layer layer-2 ${shuffling ? "show shake-2" : ""}`} style={shuffling ? null : { transform: "translate(-5px, 6px) rotate(-2.1deg)" }} />
           <div className={`stack-layer layer-1 ${shuffling ? "show shake-1" : ""}`} style={shuffling ? null : { transform: "translate(3px, 3px) rotate(1.2deg)" }} />
@@ -197,8 +207,6 @@ function DrawView({ cards, currentCard, pendingIdx, phase, hasDrawn, ready, load
             ) : (
               <CardBack idle />
             )}
-            {/* Pre-mount the chosen card image during shuffle so it's decoded
-                and pixel-ready by the time we flip — no blank flash. */}
             {pendingIdx != null && (
               <img
                 src={cards[pendingIdx].file}
@@ -211,29 +219,6 @@ function DrawView({ cards, currentCard, pendingIdx, phase, hasDrawn, ready, load
           </div>
         </div>
       </main>
-
-      <footer className="actions">
-        {!empty && (
-          <button className="btn btn-primary" onClick={onDraw} disabled={shuffling || !ready}>
-            <IconShuffle />
-            <span>
-              {!ready
-                ? `Laster bilder… ${loadedPct}%`
-                : shuffling
-                ? "Stokker…"
-                : hasDrawn
-                ? "Trekk på nytt"
-                : "Trekk tilfeldig kart"}
-            </span>
-          </button>
-        )}
-        {!empty && !ready && (
-          <div className="meta">
-            <span className="meta-dot meta-dot-loading" />
-            <span>Laster {cards.length + 1} bilder</span>
-          </div>
-        )}
-      </footer>
     </div>
   );
 }
@@ -247,16 +232,6 @@ function EmptyState() {
         Legg bildefilene i <code>/cards/</code> og register dem i{" "}
         <code>cards.js</code>.
       </p>
-    </div>
-  );
-}
-
-function ReadyState({ count }) {
-  return (
-    <div className="ready">
-      <div className="ready-mark"><Compass size={56} /></div>
-      <p className="ready-text">{count} kart venter</p>
-      <p className="ready-sub">Trykk på knappen under for å trekke</p>
     </div>
   );
 }
@@ -280,56 +255,16 @@ function CardDisplay({ card, phase }) {
 }
 
 function CardBack({ flicker, idle }) {
-  // Random per-mount filter to make each "new" back look slightly different,
-  // as if it's actually a different physical card.
   const filter = useMemo(() => {
-    const b = (0.88 + Math.random() * 0.24).toFixed(3);     // 0.88 – 1.12
-    const c = (0.92 + Math.random() * 0.18).toFixed(3);     // 0.92 – 1.10
-    const h = (Math.random() * 14 - 7).toFixed(1);          // -7 – +7 deg
-    const s = (0.92 + Math.random() * 0.16).toFixed(3);     // 0.92 – 1.08
+    const b = (0.88 + Math.random() * 0.24).toFixed(3);
+    const c = (0.92 + Math.random() * 0.18).toFixed(3);
+    const h = (Math.random() * 14 - 7).toFixed(1);
+    const s = (0.92 + Math.random() * 0.16).toFixed(3);
     return `brightness(${b}) contrast(${c}) hue-rotate(${h}deg) saturate(${s})`;
   }, [flicker, idle]);
   return (
     <div className={`card-shown card-back ${flicker ? "is-flicker" : ""} ${idle ? "is-idle" : ""}`}>
       <img src={window.CARD_BACK} alt="" style={{ filter }} />
-    </div>
-  );
-}
-
-function ListView({ cards, onBack }) {
-  return (
-    <div className="screen">
-      <header className="topbar">
-        <button className="icon-btn" onClick={onBack} aria-label="Tilbake">
-          <IconBack />
-        </button>
-        <div className="brand brand-center">
-          <div className="brand-text">
-            <div className="kicker">Bunken</div>
-            <h1 className="h1-small">{cards.length} kart-kort</h1>
-          </div>
-        </div>
-        <div style={{ width: 44 }} />
-      </header>
-
-      <div className="manage-body">
-        <ul className="card-list">
-          {cards.map((c) => (
-            <li key={c.file} className="card-row">
-              <div className="thumb">
-                <img src={c.file} alt={c.name} />
-              </div>
-              <div className="row-main">
-                <div className="row-name">{c.name}</div>
-                <div className="row-file">{c.file}</div>
-              </div>
-            </li>
-          ))}
-        </ul>
-        <p className="storage-note">
-          Endre listen i <code>cards.js</code> for å legge til eller fjerne kort.
-        </p>
-      </div>
     </div>
   );
 }

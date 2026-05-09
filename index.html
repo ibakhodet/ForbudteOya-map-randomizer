@@ -421,7 +421,26 @@
       100% { transform: translateY(0)    rotate(0)    scale(1);      opacity: 1; filter: brightness(1); }
     }
 
-    /* Actions */
+    /* Tappable card stack */
+    .card-stack-tap {
+      cursor: pointer;
+    }
+    .card-stack-tap:active .card-frame {
+      transform: scale(0.985);
+    }
+
+    /* Undo button */
+    .undo-btn {
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease, background 0.15s, color 0.15s;
+    }
+    .undo-btn.undo-visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    /* Actions (kept for any future use) */
     .actions {
       display: flex;
       flex-direction: column;
