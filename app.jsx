@@ -111,7 +111,7 @@ function App() {
     // ---- Shuffle: show card backs while the deck riffles ----
     setPhase("shuffling");
     setPendingIdx(next); // mounts the chosen image hidden so it decodes during the shuffle
-    const SHUFFLE_MS = 1250;
+    const SHUFFLE_MS = 1150;
 
     // Play the shuffle sound
     const a = audioRef.current;
@@ -139,7 +139,7 @@ function App() {
       setPhase("revealing");
       setPendingIdx(null);
       shuffleTimers.current.push(
-        setTimeout(() => setPhase("idle"), 650)
+        setTimeout(() => setPhase("idle"), 550)
       );
     });
   }
